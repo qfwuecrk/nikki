@@ -33,6 +33,7 @@ static void print_help()
 
 int main(int argc, char **argv)
 {
+    /* init */
     int ret = 0;
 
     int index = 0;
@@ -58,6 +59,11 @@ int main(int argc, char **argv)
     inet_pton(AF_INET, "0.0.0.0", &laddr.sin_addr.s_addr);
     laddr.sin_port = htons(atoi(client_conf.rcvport));
 
+    int pipefd[2] = {0};
+
+    pid_t pid;
+
+    /* getopt */
     while (true)
     {
         cmd = getopt_long(argc, argv, "P:M:p:H", argarr, &index);
@@ -85,6 +91,7 @@ int main(int argc, char **argv)
         }
     }
 
+    /* socket */
     client_socket = socket(AF_INET, SOCK_DGRAM, 0);
     if (client_socket < 0)
     {
@@ -98,7 +105,7 @@ int main(int argc, char **argv)
         perror("setsockopt()");
         exit(EXIT_FAILURE);
     }
-    
+
     val = 1;
     ret = setsockopt(client_socket, IPPROTO_IP, IP_MULTICAST_LOOP, &val, sizeof(val));
     if (ret < 0)
@@ -114,9 +121,34 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    // pipe();
+    /* pipe */
+    ret = pipe(pipefd);
+    if (ret < 0)
+    {
+        perror("pipe()");
+        exit(EXIT_FAILURE);
+    }
 
-    // fork();
+    pid = fork();
+    if (pid < 0)
+    {
+        perror("fork()");
+        exit(EXIT_FAILURE);
+    }
+
+    if (pid == 0)
+    {
+        /* child */
+        close(client_socket);
+        close(pipefd[1]);
+        dup2(pipefd[0], 0);
+        if (pipefd[0] > 0)
+            close(pipefd[0]);
+        
+        execl("/usr/bin/bash", "sh", "-c", client_conf.player_cmd, NULL);
+        perror("execl()");
+        exit(EXIT_FAILURE);
+    }
 
     //  子进程：调用解码器
     //  父进程：从网络上收包
