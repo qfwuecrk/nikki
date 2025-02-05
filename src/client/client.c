@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <errno.h>
 #include <getopt.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -31,10 +32,34 @@ static void print_help()
     return;
 }
 
+static ssize_t writen(int fd, const char *buf, size_t count);
+
+static ssize_t writen(int fd, const char *buf, size_t count)
+{
+    int pos = 0;
+    ssize_t len;
+    while (count > 0)
+    {
+        len = write(fd, buf + pos, count);
+        if (len < 0)
+        {
+            if (errno == EINVAL)
+                continue;
+            perror("write()");
+            return -1;
+        }
+        count -= len;
+        pos += len;
+    }
+    return pos;
+}
+
 int main(int argc, char **argv)
 {
     /* init */
     int ret = 0;
+    size_t len = 0;
+    int chosenid = 0;
 
     int index = 0;
     int cmd = 0;
@@ -54,7 +79,9 @@ int main(int argc, char **argv)
 
     int val = 0;
 
-    struct sockaddr_in laddr;
+    struct sockaddr_in laddr, serveraddr, raddr;
+    socklen_t serveaddr_len, raddr_len;
+
     laddr.sin_family = AF_INET;
     inet_pton(AF_INET, "0.0.0.0", &laddr.sin_addr.s_addr);
     laddr.sin_port = htons(atoi(client_conf.rcvport));
@@ -62,6 +89,10 @@ int main(int argc, char **argv)
     int pipefd[2] = {0};
 
     pid_t pid;
+
+    struct msg_list_st *msg_list;
+    struct msg_listentry_st *pos;
+    struct msg_channel_st *msg_channel;
 
     /* getopt */
     while (true)
@@ -144,14 +175,81 @@ int main(int argc, char **argv)
         dup2(pipefd[0], 0);
         if (pipefd[0] > 0)
             close(pipefd[0]);
-        
+
         execl("/usr/bin/bash", "sh", "-c", client_conf.player_cmd, NULL);
         perror("execl()");
         exit(EXIT_FAILURE);
     }
 
-    //  子进程：调用解码器
-    //  父进程：从网络上收包
+    msg_list = malloc(MSG_LSIT_MAX);
+    if (msg_list == NULL)
+    {
+        perror("malloc()");
+        exit(EXIT_FAILURE);
+    }
+
+    while (true)
+    {
+        len = recvfrom(client_socket, msg_list, MSG_LSIT_MAX, 0, (void *)&serveraddr, &serveaddr_len);
+        if (len < sizeof(struct msg_list_st))
+        {
+            fprintf(stderr, "message is to small.\n");
+            continue;
+        }
+        if (msg_list->chnid != LISTCHNID)
+        {
+            fprintf(stderr, "chnid is not match.\n");
+            continue;
+        }
+        break;
+    }
+
+    for (pos = msg_list->entry; (char *)pos < ((char *)msg_list) + len; pos = (void *)((char *)pos + ntohs(pos->len)))
+    {
+        fprintf(stdout, "chnnel\t%d : %s\n", pos->chnid, pos->desc);
+    }
+
+    free(msg_list);
+
+    while (true)
+    {
+        ret = scanf("%d", &chosenid);
+        if (ret != 1)
+            exit(EXIT_FAILURE);
+    }
+
+    msg_channel = malloc(MSG_CHANNEL_MAX);
+    if (msg_channel == NULL)
+    {
+        perror("malloc()");
+        exit(EXIT_FAILURE);
+    }
+
+    while (true)
+    {
+        len = recvfrom(client_socket, msg_channel, MSG_CHANNEL_MAX, 0, (void *)&raddr, &raddr_len);
+        if (raddr.sin_addr.s_addr != serveraddr.sin_addr.s_addr)
+        {
+            fprintf(stderr, "Ignore: address not match.\n");
+            continue;
+        }
+        if (len < sizeof(struct msg_channel_st))
+        {
+            fprintf(stderr, "Ignore: message too smail.\n");
+            continue;
+        }
+        if (msg_channel->chnid == chosenid)
+        {
+            ret = writen(pipefd[1], (void *)msg_channel->data, len-sizeof(chnid_t));
+            if (ret < 0)
+            {
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
+
+    free(msg_channel);
+    close(client_socket);
 
     return 0;
 }
