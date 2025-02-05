@@ -17,7 +17,7 @@
 #define MSG_LSIT_MAX (65536 - 20 - 8)
 #define MAX_ENTRY (MSG_LSIT_MAX - sizeof(chnid_t))
 
-struct msg_channal_st
+struct msg_channel_st
 {
     chnid_t chnid;
     uint8_t data[1];
@@ -26,6 +26,7 @@ struct msg_channal_st
 struct msg_listentry_st
 {
     chnid_t chnid;
+    uint16_t len;
     uint8_t desc[1];
 } __attribute__((packed));
 
